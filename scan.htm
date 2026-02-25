@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>課程報到掃描系統</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { background-color: #1a202c; font-family: "PingFang TC", sans-serif; margin: 0; padding: 0; color: white; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        .container { width: 100%; max-width: 500px; padding: 20px; box-sizing: border-box; }
+        h2 { text-align: center; margin-top: 20px; color: #63b3ed; }
+        #reader { width: 100%; border-radius: 20px; overflow: hidden; border: 2px solid #4a5568 !important; background: black; }
+        .result-card { background: #2d3748; padding: 20px; border-radius: 20px; margin-top: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); text-align: center; display: none; }
+        .status-success { color: #48bb78; font-size: 1.5em; font-weight: bold; }
+        .status-error { color: #f56565; font-size: 1.2em; font-weight: bold; }
+        .info { margin: 10px 0; font-size: 1.1em; color: #cbd5e0; }
+        .btn-retry { background: #4a5568; color: white; border: none; padding: 12px 25px; border-radius: 12px; cursor: pointer; margin-top: 15px; font-size: 16px; }
+        .instruction { color: #718096; font-size: 0.9em; text-align: center; margin-top: 15px; }
+        
+        /* 管理面板 */
+        .admin-panel { width: 100%; max-width: 500px; padding: 20px; box-sizing: border-box; }
+        h3 { color: #63b3ed; border-left: 4px solid #4299e1; padding-left: 10px; margin-bottom: 15px; }
+        select { width: 100%; padding: 12px; border-radius: 12px; border: none; background: #2d3748; color: white; font-size: 16px; margin-bottom: 15px; cursor: pointer; border: 1px solid #4a5568; }
+        .table-container { overflow-x: auto; background: #2d3748; border-radius: 15px; padding: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
+        th { padding: 12px 10px; border-bottom: 2px solid #4a5568; color: #63b3ed; }
+        td { padding: 12px 10px; border-bottom: 1px solid #3d4957; color: #cbd5e0; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>報到掃描</h2>
+        
+        <div class="form-group">
+            <label style="display:block; margin-bottom:8px; color:#cbd5e0; font-size:0.9em;">請先選擇活動場次：</label>
+            <select id="dateSelect" onchange="onDateChange()">
+                <option value="">載入日期中...</option>
+            </select>
+        </div>
+
+        <div id="reader"></div>
+        <p class="instruction">請將學員的 QR Code 置於鏡頭框內</p>
+
+        <div id="result-card" class="result-card">
+            <div id="status-text"></div>
+            <div id="student-info" class="info"></div>
+            <button class="btn-retry" onclick="restartScanner()">繼續掃描下一個</button>
+        </div>
+    </div>
+
+    <div class="admin-panel">
+        <h3>當前報名名單</h3>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>姓名</th>
+                        <th>狀態</th>
+                    </tr>
+                </thead>
+                <tbody id="listBody">
+                    <tr><td colspan="2" style="text-align:center; padding:20px;">請先選擇日期</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbz5XCUsdSbhtmK46_d6i6rUsEZssaF5y82XOCIzm2e7tvTJ0HEZkUDmRADf8prFd4YTug/exec"; 
+        const html5QrCode = new Html5Qrcode("reader");
+        const qrConfig = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+        // 1. 頁面開啟自動初始化日期
+        window.onload = async function() {
+            await fetchDates();
+            startScanner();
+        };
+
+        // 2. 抓取 Google Sheet 上的 8 位數日期標題
+        async function fetchDates() {
+            const dateSelect = document.getElementById('dateSelect');
+            try {
+                const res = await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'getDates' })
+                });
+                const result = await res.json();
+                if (result.result === 'success' && result.dates.length > 0) {
+                    dateSelect.innerHTML = ''; 
+                    result.dates.forEach(date => {
+                        const opt = document.createElement('option');
+                        opt.value = date;
+                        opt.innerText = date.toString().replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+                        dateSelect.appendChild(opt);
+                    });
+                    // 自動載入第一個場次的清單
+                    loadList();
+                } else {
+                    dateSelect.innerHTML = '<option value="">無日期資料</option>';
+                }
+            } catch (e) {
+                dateSelect.innerHTML = '<option value="">連線日期失敗</option>';
+            }
+        }
+
+        // 3. 當日期切換時
+        function onDateChange() {
+            loadList(); // 更新下方名單
+            // 如果正在顯示結果卡片，則隱藏它
+            document.getElementById('result-card').style.display = 'none';
+        }
+
+        // 4. 啟動掃描器
+        function startScanner() {
+            html5QrCode.start({ facingMode: "environment" }, qrConfig, onScanSuccess)
+            .catch(err => { alert("無法啟動相機，請確認權限或使用 HTTPS 連線。"); });
+        }
+
+        // 5. 掃描成功處理 (連動日期)
+        async function onScanSuccess(decodedText) {
+            const selectedDate = document.getElementById('dateSelect').value;
+            if (!selectedDate) {
+                alert("請先選擇報到日期場次！");
+                return;
+            }
+
+            await html5QrCode.pause(true);
+            
+            const regex = /^(\d{8})$/;
+            const match = decodedText.match(regex);
+
+            if (!match) {
+                showResult("error", "格式錯誤", "非本系統產生之 QR Code");
+                return;
+            }
+
+            const uniqueCode = match[1];
+
+            showResult("processing", "讀取中...", "正在更新報到狀態...");
+            
+            try {
+                const res = await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ 
+                        action: 'checkIn', 
+                        uniqueCode: uniqueCode, 
+                        courseDate: selectedDate 
+                    })
+                });
+                const data = await res.json();
+
+                if (data.result === 'success') {
+                    showResult("success", "報到成功！", `學員：${data.name}`);
+                    loadList(); // 報到成功後即時更新下方清單狀態
+                } else if (data.result === 'already') {
+                    showResult("error", "重複報到", "此學員已完成報到過囉！");
+                } else if (data.result === 'not_registered') {
+                    showResult("error", "未報名", "此碼尚未報名本場次或未通過審核。");
+                } else {
+                    showResult("error", "失敗", data.message || "系統發生錯誤");
+                }
+            } catch (e) {
+                showResult("error", "連線失敗", "請檢查網路。");
+            }
+        }
+
+        // 6. 抓取報名名單 (只顯示姓名與狀態)
+        async function loadList() {
+            const selectedDate = document.getElementById('dateSelect').value;
+            const tbody = document.getElementById('listBody');
+            if (!selectedDate) return;
+
+            tbody.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:20px;">資料載入中...</td></tr>';
+
+            try {
+                const res = await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'getList', courseDate: selectedDate })
+                });
+                const result = await res.json();
+
+                if (result.result === 'success') {
+                    tbody.innerHTML = '';
+                    if (result.data.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:20px;">此場次尚無報名資料</td></tr>';
+                        return;
+                    }
+                    result.data.forEach(item => {
+                        const tr = document.createElement('tr');
+                        const statusColor = item.status === "已報到" ? "#ff0019" : (item.status === "已報名" ? "#f6ad55" : (item.status === "待審核" ? "#cbd5e0" : "#cbd5e0"));
+                        tr.innerHTML = `
+                            <td>${item.name}</td>
+                            <td style="color:${statusColor}; font-weight:bold;">${item.status}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:20px; color:#f56565;">資料載入失敗</td></tr>';
+            }
+        }
+
+        function showResult(type, title, message) {
+            const card = document.getElementById('result-card');
+            const statusText = document.getElementById('status-text');
+            const infoText = document.getElementById('student-info');
+            card.style.display = 'block';
+            statusText.innerText = title;
+            infoText.innerHTML = message;
+
+            if (type === 'success') {
+                statusText.className = 'status-success';
+                if (navigator.vibrate) navigator.vibrate(200);
+            } else if (type === 'processing') {
+                statusText.className = 'info';
+            } else {
+                statusText.className = 'status-error';
+            }
+        }
+
+        function restartScanner() {
+            document.getElementById('result-card').style.display = 'none';
+            html5QrCode.resume();
+        }
+    </script>
+</body>
+</html>

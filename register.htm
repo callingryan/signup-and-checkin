@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>課程報名系統</title>
+    <style>
+        body { background-color: #f4f7f6; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; }
+        
+        .container { width: 100%; max-width: 500px; padding: 15px; box-sizing: border-box; }
+
+        .form-card { background: white; padding: 30px; border-radius: 24px; box-shadow: 0 12px 30px rgba(0,0,0,0.08); box-sizing: border-box; margin-bottom: 20px; }
+        h2 { text-align: center; color: #2c3e50; margin-top: 0; margin-bottom: 25px; font-size: 1.5em; }
+
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #4a5568; font-size: 0.9em; }
+        input, select { width: 100%; padding: 14px 18px; border: 2px solid #edf2f7; border-radius: 14px; font-size: 16px; box-sizing: border-box; transition: all 0.3s; }
+        input:focus, select:focus { outline: none; border-color: #4299e1; box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.15); }
+
+        .submit-btn { width: 100%; padding: 16px; background-color: #4299e1; color: white; border: none; border-radius: 14px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .submit-btn:hover { background-color: #3182ce; }
+
+        #msg { color: #e53e3e; font-size: 0.85em; margin-bottom: 15px; text-align: center; min-height: 1.2em; font-weight: bold; }
+        #courseInfo { margin-top: 10px; padding: 10px; background: #f7fafc; border-radius: 10px; color: #4a5568; font-size: 0.9em; display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="form-card">
+            <h2>課程報名</h2>
+            <div id="msg"></div>
+
+            <div class="form-group">
+                <label>姓名</label>
+                <input type="text" id="name" placeholder="請輸入姓名">
+            </div>
+
+            <div class="form-group">
+                <label>性別</label>
+                <select id="gender">
+                    <option value="">請選擇</option>
+                    <option value="男">男</option>
+                    <option value="女">女</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>身分證字號後4碼</label>
+                <input type="text" id="idLast4" placeholder="請輸入後4碼" maxlength="4" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+            </div>
+
+            <div class="form-group">
+                <label>聯絡電話 (手機)</label>
+                <input type="tel" id="phone" placeholder="輸入10碼手機" maxlength="10" oninput="validatePhone(this)">
+            </div>
+
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="email" placeholder="請輸入電子郵件">
+            </div>
+
+            <div class="form-group">
+                <label>課程名稱</label>
+                <select id="courseSelect" onchange="showCourseInfo()">
+                    <option value="">載入課程中...</option>
+                </select>
+                <div id="courseInfo"></div>
+            </div>
+
+            <button onclick="submitRegistration()" class="submit-btn" id="btn-text">確認報名</button>
+        </div>
+    </div>
+
+    <script>
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbz5XCUsdSbhtmK46_d6i6rUsEZssaF5y82XOCIzm2e7tvTJ0HEZkUDmRADf8prFd4YTug/exec"; // 替換為你的 Apps Script Web App URL
+        let courses = []; // 儲存課程列表
+
+        function validatePhone(input) {
+            input.value = input.value.replace(/[^0-9]/g, '');
+            if (input.value.length > 10) input.value = input.value.slice(0, 10);
+        }
+
+        // 頁面載入時抓取課程列表
+        window.onload = async function() {
+            await fetchCourses();
+        };
+
+        async function fetchCourses() {
+            const courseSelect = document.getElementById('courseSelect');
+            try {
+                const res = await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'getCourses' })
+                });
+                const result = await res.json();
+                if (result.result === 'success' && result.courses.length > 0) {
+                    courses = result.courses;
+                    courseSelect.innerHTML = '<option value="">請選擇課程</option>';
+                    result.courses.forEach(course => {
+                        const opt = document.createElement('option');
+                        opt.value = course.date;
+                        opt.innerText = course.name;
+                        courseSelect.appendChild(opt);
+                    });
+                } else {
+                    courseSelect.innerHTML = '<option value="">無課程資料</option>';
+                }
+            } catch (e) {
+                courseSelect.innerHTML = '<option value="">載入失敗</option>';
+            }
+        }
+
+        // 選擇課程後顯示內容
+        function showCourseInfo() {
+            const selectedDate = document.getElementById('courseSelect').value;
+            const infoDiv = document.getElementById('courseInfo');
+            if (selectedDate) {
+                const selectedCourse = courses.find(c => c.date === selectedDate);
+                if (selectedCourse) {
+                    infoDiv.innerHTML = selectedCourse.content;
+                    infoDiv.style.display = 'block';
+                    return;
+                }
+            }
+            infoDiv.style.display = 'none';
+        }
+
+        async function submitRegistration() {
+            const name = document.getElementById('name').value.trim();
+            const gender = document.getElementById('gender').value;
+            const idLast4 = document.getElementById('idLast4').value.trim();
+            const phone = document.getElementById('phone').value.trim();
+            const email = document.getElementById('email').value.trim();
+            const courseDate = document.getElementById('courseSelect').value;
+
+            if (!name || !gender || idLast4.length !== 4 || phone.length !== 10 || !email || !courseDate) {
+                document.getElementById('msg').innerText = "請填寫完整資訊（手機10碼、身份证后4码、選擇課程）";
+                return;
+            }
+
+            document.getElementById('btn-text').innerText = "處理中...";
+            document.getElementById('msg').innerText = "";
+
+            try {
+                const res = await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: 'register',
+                        name: name,
+                        gender: gender,
+                        idLast4: idLast4,
+                        phone: phone,
+                        email: email,
+                        courseDate: courseDate
+                    })
+                });
+                const result = await res.json();
+                if (result.result === 'success') {
+                    document.getElementById('msg').innerText = "報名成功！已發送確認 email，請檢查信箱。";
+                    document.getElementById('btn-text').innerText = "確認報名";
+                } else {
+                    throw new Error(result.message || "報名失敗");
+                }
+            } catch (e) {
+                document.getElementById('msg').innerText = e.message || "報名失敗，請稍後再試。";
+                document.getElementById('btn-text').innerText = "確認報名";
+            }
+        }
+    </script>
+</body>
+</html>
